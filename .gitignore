@@ -4,3 +4,4 @@
 env.json
 .ipynb_checkpoints/*
 __pycache__/
+.aws_keys.json
