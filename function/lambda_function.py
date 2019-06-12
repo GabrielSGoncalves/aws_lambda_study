@@ -1,12 +1,20 @@
 import os
 from sqlalchemy import create_engine
 import smtplib
-import email.message
+import ssl
+import dns.resolver
+import socket
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
+# HTML to go on the body of the email
 email_content = """
-<head>
-  <meta charset="UTF-8">
+<!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
 </head>
+<body>
 <table align="center" border="0" cellpadding="0" cellspacing="0" style="width:700px;">
    <tbody>
       <tr>
@@ -30,9 +38,10 @@ email_content = """
                      <td style="width:500px;font-family: arial;font-weight: bold;font-size:30px;color: #000001;text-align: center;padding-bottom:15px">Ainda na dúvida sobre a sua situação psiquiátrica?</td>
                   </tr>
                   <tr>
-                     <td style="width:700px;font-family: arial;font-size:20px;color: #000000;text-align: center;line-height:30px;padding-bottom:15px">Sabemos da dificuldade em lidar com os problemas que você pode estar sofrendo e queremos muito ajudá-lo a superá-los. 
+                     <td style="width:700px;font-family: arial;font-size:20px;color: #000000;text-align: center;line-height:30px;padding-bottom:15px">Entendemos a dificuldade em lidar com os problemas que você pode estar sofrendo, registramos seu interesse, é por vezes é difícil prosseguir.<br>
+                        Vamos juntos?!!
                          <br><br>
-                        Nossa ferramenta de avaliação psiquiátrica é grátis e o processo não dura 4 minutos.
+                        Nossa ferramenta de avaliação foi elaborada com muito cuidado e critérios científicos, não será cobrado nada pelo uso da sugestão diagnostica e o processo leva uns 4 minutos!
                         <br><br>
                         Acesse através do <a href="https://appgymbrain.com"><b>link</b></a> e nós da GyMBrain teremos o prazer em ajudá-lo com o que há de mais avançado em diagnóstico psiquiátrico.
                         <br><br>
@@ -41,7 +50,7 @@ email_content = """
 
                   </td>
                   </tr>
-                 
+
                </tbody>
             </table>
          </td>
@@ -87,33 +96,94 @@ email_content = """
       </tr>
    </tbody>
 </table>
+</body>
+</html>
 """
 
 
+# Main function to be called for lambda
 def lambda_handler(event, context):
-    var1 = os.environ.get("var1")
-    var2 = os.environ.get("var2")
 
+        # Connect to ClickOn database and execute query on core_clickon table
     db = create_engine(
         'postgresql+pg8000://root:hopes030411@gymbraininstance.c1pkp7hr6szo.us-east-1.rds.amazonaws.com:5432/gymbrain')
     results = db.execute("SELECT * FROM public.core_clickon")
+    print('Getting list of emails from ClickOn Database')
+
+    #
+    records = dns.resolver.query('gmail.com', 'MX')
+    mxRecord = records[0].exchange
+    mxRecord = str(mxRecord)
+
+    # Create list to receive emails that are invalid
+    invalid_emails = []
+
+    # Iterate over the results from query
     for r in results:
         if r.points_clickon == None:
-            print(r.email)
-            server = smtplib.SMTP('smtp.gmail.com:587')
-            msg = email.message.Message()
-            msg['Subject'] = 'Teste Python Email HTML'
 
-            msg['From'] = 'gabrielgoncalvesbr@gmail.com'
-            msg['To'] = r.email
-            password = "atlas2000"
-            msg.add_header('Content-Type', 'text/html')
-            msg.set_payload(email_content)
+            addressToVerify = r.email
 
-            s = smtplib.SMTP('smtp.gmail.com: 587')
-            s.starttls()
+            # Get local server hostname
+            host = socket.gethostname()
 
-            # Login Credentials for sending the mail
-            s.login(msg['From'], password)
+            # SMTP lib setup (use debug level for full output)
+            server = smtplib.SMTP()
+            server.set_debuglevel(0)
 
-            s.sendmail(msg['From'], [msg['To']], msg.as_string())
+            # SMTP Conversation
+            server.connect(mxRecord)
+            server.helo(host)
+            server.mail('gabriel@codenomics.cloud')
+            code, message = server.rcpt(str(addressToVerify))
+            server.quit()
+
+            print(code, message)
+
+            # Assume 250 as Success
+            if code == 250:
+                print('Success')
+                print(r.email)
+                sender_email = "contato@gymbrain.com.br"
+                password = 'Burnoutdepascoa'
+                receiver_email = r.email
+
+                print('Before MIMEMultipart')
+
+                message = MIMEMultipart("alternative")
+                message[
+                    "Subject"] = "Faça sua avaliação psiquiátrica de forma gratuita"
+                message["From"] = sender_email
+                message["To"] = receiver_email
+
+                print('After MIMEMultipart')
+
+                # Create the plain-text and HTML version of your message
+                # Turn these into plain/html MIMEText objects
+                # part1 = MIMEText(text, "plain")
+                part = MIMEText(email_content, "html")
+
+                # Add HTML/plain-text parts to MIMEMultipart message
+                # The email client will try to render the last part first
+                # message.attach(part1)
+                message.attach(part)
+
+                print('After message.attach')
+                # Create secure connection with server and send email
+                context = ssl.create_default_context()
+
+                print('After ssl.create_default_context')
+
+                with smtplib.SMTP_SSL("bh-73.webhostbox.net", 465, context=context) as server:
+                    server.login(sender_email, password)
+                    server.sendmail(
+                        sender_email, receiver_email, message.as_string()
+                    )
+                print('END OF LOOP for {}'.format(r.email))
+
+            else:
+                print('Email {} does not exist.'.format(r.email))
+                invalid_emails.append(r.email)
+
+    # Send email to rmiotto@gmail.com and gabriel@codenomics.cloud
+    print(invalid_emails)
