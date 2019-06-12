@@ -1,6 +1,8 @@
 import os
+import time
 from sqlalchemy import create_engine
 import smtplib
+from validate_email import validate_email
 import ssl
 import dns.resolver
 import socket
@@ -104,49 +106,31 @@ email_content = """
 # Main function to be called for lambda
 def lambda_handler(event, context):
 
-        # Connect to ClickOn database and execute query on core_clickon table
+    # Connect to ClickOn database and execute query on core_clickon table
     db = create_engine(
-        'postgresql+pg8000://root:hopes030411@gymbraininstance.c1pkp7hr6szo.us-east-1.rds.amazonaws.com:5432/gymbrain')
-    results = db.execute("SELECT * FROM public.core_clickon")
+    'postgresql+pg8000://root:hopes030411@gymbraininstance.c1pkp7hr6szo.us-east-1.rds.amazonaws.com:5432/gymbrain')
+    results = db.execute("SELECT * FROM public.core_clickon WHERE points_clickon is NULL")
     print('Getting list of emails from ClickOn Database')
-
-    #
-    records = dns.resolver.query('gmail.com', 'MX')
-    mxRecord = records[0].exchange
-    mxRecord = str(mxRecord)
+    list_emails = [r.email for r in results]
+    
 
     # Create list to receive emails that are invalid
     invalid_emails = []
 
     # Iterate over the results from query
-    for r in results:
+    for email in list_emails:
         if r.points_clickon == None:
 
-            addressToVerify = r.email
+            # Validate email
+            is_valid = validate_email(email, verify=True)
 
-            # Get local server hostname
-            host = socket.gethostname()
-
-            # SMTP lib setup (use debug level for full output)
-            server = smtplib.SMTP()
-            server.set_debuglevel(0)
-
-            # SMTP Conversation
-            server.connect(mxRecord)
-            server.helo(host)
-            server.mail('gabriel@codenomics.cloud')
-            code, message = server.rcpt(str(addressToVerify))
-            server.quit()
-
-            print(code, message)
-
-            # Assume 250 as Success
-            if code == 250:
-                print('Success')
-                print(r.email)
+            # Check if email is valid
+            if is_valid:
+                print('Success! {} is a valid email'.format(r.email))
+                
                 sender_email = "contato@gymbrain.com.br"
                 password = 'Burnoutdepascoa'
-                receiver_email = r.email
+                receiver_email = email
 
                 print('Before MIMEMultipart')
 
@@ -182,8 +166,35 @@ def lambda_handler(event, context):
                 print('END OF LOOP for {}'.format(r.email))
 
             else:
-                print('Email {} does not exist.'.format(r.email))
-                invalid_emails.append(r.email)
+                print('Email {} does not exist.'.format(email))
+                invalid_emails.append(email)
 
     # Send email to rmiotto@gmail.com and gabriel@codenomics.cloud
-    print(invalid_emails)
+    # Define body of email with list of emails
+    localtime = time.asctime( time.localtime(time.time()) )
+    content = """Segue a lista de emails inválidos acessando o ClickOn:\n
+    {}
+
+    Horário de execução do processo: {}
+    """.format('\n'.join(invalid_emails), localtime)
+
+    password = 'Burnoutdepascoa'
+    message = MIMEMultipart("alternative")
+    message["Subject"] = "Teste disparo de emails ClickOn"
+    message["From"] = "contato@gymbrain.com.br"
+    message["To"] = 'gabriel@codenomics.cloud'
+    
+    part = MIMEText(content, "plain")
+
+    message.attach(part)
+
+    print('After message.attach')
+    # Create secure connection with server and send email
+    context = ssl.create_default_context()
+
+    print('After ssl.create_default_context')
+
+    with smtplib.SMTP_SSL("bh-73.webhostbox.net", 465, context=context) as server:
+        server.login(sender_email, password)
+        server.sendmail(sender_email, receiver_email, message.as_string())
+
