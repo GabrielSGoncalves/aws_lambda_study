@@ -2,12 +2,12 @@ import os
 import time
 from sqlalchemy import create_engine
 import smtplib
-from validate_email import validate_email
 import ssl
 import dns.resolver
 import socket
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from validate_email import validate_email
 
 # HTML to go on the body of the email
 email_content = """
@@ -40,14 +40,14 @@ email_content = """
                      <td style="width:500px;font-family: arial;font-weight: bold;font-size:30px;color: #000001;text-align: center;padding-bottom:15px">Ainda na dúvida sobre a sua situação psiquiátrica?</td>
                   </tr>
                   <tr>
-                     <td style="width:700px;font-family: arial;font-size:20px;color: #000000;text-align: center;line-height:30px;padding-bottom:15px">Entendemos a dificuldade em lidar com os problemas que você pode estar sofrendo, registramos seu interesse, é por vezes é difícil prosseguir.<br>
+                     <td style="width:700px;font-family: arial;font-size:20px;color: #000000;text-align: center;line-height:30px;padding-bottom:15px">Entendemos a dificuldade em lidar com os problemas que você possa estar sofrendo, registramos seu interesse, é por vezes é difícil prosseguir.<br>
                         Vamos juntos?!!
                          <br><br>
                         Nossa ferramenta de avaliação foi elaborada com muito cuidado e critérios científicos, não será cobrado nada pelo uso da sugestão diagnostica e o processo leva uns 4 minutos!
                         <br><br>
                         Acesse através do <a href="https://appgymbrain.com"><b>link</b></a> e nós da GyMBrain teremos o prazer em ajudá-lo com o que há de mais avançado em diagnóstico psiquiátrico.
                         <br><br>
-                        <a href="https://appgymbrain.com"><b>Saiba mais a repeito!!</b></a><br><br>
+                        <a href="https://appgymbrain.com"><b>Saiba mais a respeito!!</b></a><br><br>
 
 
                   </td>
@@ -109,75 +109,80 @@ def lambda_handler(event, context):
     # Connect to ClickOn database and execute query on core_clickon table
     db = create_engine(
     'postgresql+pg8000://root:hopes030411@gymbraininstance.c1pkp7hr6szo.us-east-1.rds.amazonaws.com:5432/gymbrain')
-    results = db.execute("SELECT * FROM public.core_clickon WHERE points_clickon is NULL")
+    
+    results = db.execute(
+    """
+    SELECT * FROM public.core_clickon 
+    WHERE points_clickon is NULL
+    """
+    )
+
     print('Getting list of emails from ClickOn Database')
-    list_emails = [r.email for r in results]
+    list_emails = set([r.email for r in results])
     
 
     # Create list to receive emails that are invalid
     invalid_emails = []
+    valid_emails = []
 
-    # Iterate over the results from query
-    for email in list_emails:
-        if r.points_clickon == None:
+    for email in list_emails: # Iterate over the results from query
+        is_valid = validate_email(email, verify=True) # Validate email
 
-            # Validate email
-            is_valid = validate_email(email, verify=True)
+        if is_valid: # Check if email is valid
+            print('Success! {} is a valid email'.format(email))
+            
+            # Define sender and receiver for email
+            sender_email = "contato@gymbrain.com.br"
+            password = 'Burnoutdepascoa'
+            receiver_email = email
+            
+            # Define information to go on emails
+            message = MIMEMultipart("alternative")
+            message["Subject"] = "Faça sua avaliação psiquiátrica de \
+            forma gratuita"
+            message["From"] = sender_email
+            message["To"] = receiver_email
 
-            # Check if email is valid
-            if is_valid:
-                print('Success! {} is a valid email'.format(r.email))
-                
-                sender_email = "contato@gymbrain.com.br"
-                password = 'Burnoutdepascoa'
-                receiver_email = email
+            # Create the plain-text and HTML version of your message
+            # Turn these into plain/html MIMEText objects
+            part = MIMEText(email_content, "html")
 
-                print('Before MIMEMultipart')
+            # Add HTML/plain-text parts to MIMEMultipart message
+            # The email client will try to render the last part first
+            message.attach(part)
 
-                message = MIMEMultipart("alternative")
-                message[
-                    "Subject"] = "Faça sua avaliação psiquiátrica de forma gratuita"
-                message["From"] = sender_email
-                message["To"] = receiver_email
+            # Create secure connection with server and send email
+            context = ssl.create_default_context()
 
-                print('After MIMEMultipart')
+            with smtplib.SMTP_SSL("bh-73.webhostbox.net", 465, 
+                                  context=context) as server:
+                server.login(sender_email, password)
+                server.sendmail(sender_email, receiver_email, 
+                                message.as_string())
+            valid_emails.append(email)
 
-                # Create the plain-text and HTML version of your message
-                # Turn these into plain/html MIMEText objects
-                # part1 = MIMEText(text, "plain")
-                part = MIMEText(email_content, "html")
-
-                # Add HTML/plain-text parts to MIMEMultipart message
-                # The email client will try to render the last part first
-                # message.attach(part1)
-                message.attach(part)
-
-                print('After message.attach')
-                # Create secure connection with server and send email
-                context = ssl.create_default_context()
-
-                print('After ssl.create_default_context')
-
-                with smtplib.SMTP_SSL("bh-73.webhostbox.net", 465, context=context) as server:
-                    server.login(sender_email, password)
-                    server.sendmail(
-                        sender_email, receiver_email, message.as_string()
-                    )
-                print('END OF LOOP for {}'.format(r.email))
-
-            else:
-                print('Email {} does not exist.'.format(email))
-                invalid_emails.append(email)
+        else:
+            print('Email {} does not exist.'.format(email))
+            invalid_emails.append(email)
 
     # Send email to rmiotto@gmail.com and gabriel@codenomics.cloud
     # Define body of email with list of emails
     localtime = time.asctime( time.localtime(time.time()) )
-    content = """Segue a lista de emails inválidos acessando o ClickOn:\n
+    
+    content = """
+    Horário de execução do processo Lambda ClickOn: {}
+
+    Segue lista de email de usuários avaliados pelo ClickOn (emails válidos):\n
     {}
 
-    Horário de execução do processo: {}
-    """.format('\n'.join(invalid_emails), localtime)
+    Segue a lista de emails inválidos acessando o ClickOn:\n
+    {}
 
+    """.format(localtime, '\n'.join(valid_emails), '\n'.join(invalid_emails))
+    
+    print('Message on the email body:')
+    print(content)
+    
     password = 'Burnoutdepascoa'
     message = MIMEMultipart("alternative")
     message["Subject"] = "Teste disparo de emails ClickOn"
@@ -185,16 +190,13 @@ def lambda_handler(event, context):
     message["To"] = 'gabriel@codenomics.cloud'
     
     part = MIMEText(content, "plain")
-
     message.attach(part)
-
-    print('After message.attach')
-    # Create secure connection with server and send email
     context = ssl.create_default_context()
-
-    print('After ssl.create_default_context')
 
     with smtplib.SMTP_SSL("bh-73.webhostbox.net", 465, context=context) as server:
         server.login(sender_email, password)
         server.sendmail(sender_email, receiver_email, message.as_string())
+
+    print("Process ended with sucess at: {}".format(
+            time.asctime(time.localtime(time.time()))))
 
