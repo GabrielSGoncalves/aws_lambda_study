@@ -119,6 +119,10 @@ def lambda_handler(event, context):
 
     print('Getting list of emails from ClickOn Database')
     list_emails = set([r.email for r in results])
+
+    # Define sender and password
+    sender_email = "contato@gymbrain.com.br"
+    password = 'Burnoutdepascoa'
     
 
     # Create list to receive emails that are invalid
@@ -129,11 +133,10 @@ def lambda_handler(event, context):
         is_valid = validate_email(email, verify=True) # Validate email
 
         if is_valid: # Check if email is valid
+            valid_emails.append(email)
             print('Success! {} is a valid email'.format(email))
             
             # Define sender and receiver for email
-            sender_email = "contato@gymbrain.com.br"
-            password = 'Burnoutdepascoa'
             receiver_email = email
             
             # Define information to go on emails
@@ -159,7 +162,6 @@ def lambda_handler(event, context):
                 server.login(sender_email, password)
                 server.sendmail(sender_email, receiver_email, 
                                 message.as_string())
-            valid_emails.append(email)
 
         else:
             print('Email {} does not exist.'.format(email))
